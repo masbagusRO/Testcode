@@ -326,7 +326,7 @@
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip.js"></script>
-    <script>
+<script>
     // ================================
     // Ambil fileId dari URL
     // ================================
@@ -334,9 +334,7 @@
         try {
             const params = new URLSearchParams(window.location.search);
             const fileId = params.get("fileId");
-            if (!fileId) {
-                throw new Error("fileId tidak ditemukan di URL.");
-            }
+            if (!fileId) throw new Error("fileId tidak ditemukan di URL.");
             return fileId;
         } catch (err) {
             console.error("Gagal mengambil fileId:", err.message);
@@ -425,7 +423,19 @@
     }
 
     // ================================
-    // Tampilkan gambar dari ZIP
+    // Blob → DataURL (hanya saat klik)
+    // ================================
+    function blobToDataURL(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error("Gagal convert blob ke dataURL"));
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // ================================
+    // Tampilkan gambar dari ZIP (versi ringan)
     // ================================
     async function tampilkanGambar(entry, password, containerId) {
         try {
@@ -441,38 +451,41 @@
                 else if (/\.gif$/i.test(filename)) mimeType = "image/gif";
             }
 
-            const url = URL.createObjectURL(new Blob([imgBlob], { type: mimeType }));
-
-            const link = document.createElement("a");
-            link.href = url;
-            link.rel = "noopener noreferrer";
+            const blobURL = URL.createObjectURL(new Blob([imgBlob], { type: mimeType }));
 
             const img = document.createElement("img");
-            img.src = url;
-            img.alt = entry.filename;
+            img.src = blobURL;
+            img.alt = filename;
             img.style.maxWidth = "200px";
             img.style.margin = "5px";
+            img.loading = "lazy"; // lazy loading untuk hemat memori
 
-            // klik gambar: coba buka di tab baru, fallback download
-            link.onclick = (e) => {
-                e.preventDefault();
-                const newTab = window.open(url, "_blank");
-                if (!newTab || newTab.closed || typeof newTab.closed === "undefined") {
-                    // fallback download
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    writeLog(`Browser tidak support open tab. File ${filename} di-download.`, "info");
-                } else {
-                    writeLog(`Gambar ${filename} dibuka di tab baru.`, "success");
+            // klik gambar: buka universal
+            img.onclick = async () => {
+                try {
+                    const dataURL = await blobToDataURL(imgBlob);
+                    const win = window.open(dataURL, "_blank");
+                    if (!win || win.closed || typeof win.closed === "undefined") {
+                        // fallback download
+                        const a = document.createElement("a");
+                        a.href = dataURL;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        writeLog(`Browser tidak support open tab, file ${filename} di-download`, "info");
+                    } else {
+                        writeLog(`Gambar ${filename} dibuka di tab baru`, "success");
+                    }
+                    // revoke blob URL untuk hemat memori
+                    URL.revokeObjectURL(blobURL);
+                } catch (err) {
+                    writeLog(`Gagal membuka gambar ${filename}: ${err.message}`, "error");
                 }
             };
 
-            link.appendChild(img);
-            document.getElementById(containerId).appendChild(link);
+            document.getElementById(containerId).appendChild(img);
+
         } catch (err) {
             writeLog(`Gagal menampilkan gambar ${entry.filename}: ${err.message}`, "error");
         }
@@ -515,11 +528,9 @@
             // Buka ZIP
             const blob = new Blob([arrayBuffer], { type: "application/zip" });
             const reader = new zip.ZipReader(new zip.BlobReader(blob));
-
             const entries = await reader.getEntries({ password });
-            if (entries.length === 0) {
-                throw new Error("ZIP kosong atau password salah");
-            }
+
+            if (entries.length === 0) throw new Error("ZIP kosong atau password salah");
 
             let teksDitemukan = false;
             let gambarDitemukan = false;
