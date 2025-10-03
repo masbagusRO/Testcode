@@ -326,7 +326,7 @@
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip.js"></script>
-<script>
+    <script>
     // ================================
     // Ambil fileId dari URL
     // ================================
@@ -334,7 +334,9 @@
         try {
             const params = new URLSearchParams(window.location.search);
             const fileId = params.get("fileId");
-            if (!fileId) throw new Error("fileId tidak ditemukan di URL.");
+            if (!fileId) {
+                throw new Error("fileId tidak ditemukan di URL.");
+            }
             return fileId;
         } catch (err) {
             console.error("Gagal mengambil fileId:", err.message);
@@ -343,7 +345,6 @@
     }
 
     let fileId;
-    let blobSupport = false;
 
     // ================================
     // Logging helper
@@ -424,21 +425,6 @@
     }
 
     // ================================
-    // Deteksi apakah browser bisa buka blob di tab baru
-    // ================================
-    function canOpenBlobInNewTab() {
-        try {
-            const blob = new Blob(["test"], { type: "text/plain" });
-            const url = URL.createObjectURL(blob);
-            const win = window.open(url);
-            URL.revokeObjectURL(url);
-            return !!win; // kalau null artinya tidak support
-        } catch (e) {
-            return false;
-        }
-    }
-
-    // ================================
     // Tampilkan gambar dari ZIP
     // ================================
     async function tampilkanGambar(entry, password, containerId) {
@@ -457,33 +443,36 @@
 
             const url = URL.createObjectURL(new Blob([imgBlob], { type: mimeType }));
 
+            const link = document.createElement("a");
+            link.href = url;
+            link.rel = "noopener noreferrer";
+
             const img = document.createElement("img");
             img.src = url;
-            img.alt = filename;
+            img.alt = entry.filename;
             img.style.maxWidth = "200px";
             img.style.margin = "5px";
 
-            // Klik gambar → buka tab baru atau download
-            img.onclick = () => {
-                if (blobSupport) {
-                    const win = window.open(url, "_blank");
-                    if (!win) {
-                        // fallback kalau popup block
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = filename;
-                        a.click();
-                    }
-                } else {
+            // klik gambar: coba buka di tab baru, fallback download
+            link.onclick = (e) => {
+                e.preventDefault();
+                const newTab = window.open(url, "_blank");
+                if (!newTab || newTab.closed || typeof newTab.closed === "undefined") {
+                    // fallback download
                     const a = document.createElement("a");
                     a.href = url;
                     a.download = filename;
+                    document.body.appendChild(a);
                     a.click();
+                    document.body.removeChild(a);
+                    writeLog(`Browser tidak support open tab. File ${filename} di-download.`, "info");
+                } else {
+                    writeLog(`Gambar ${filename} dibuka di tab baru.`, "success");
                 }
             };
 
-            document.getElementById(containerId).appendChild(img);
-
+            link.appendChild(img);
+            document.getElementById(containerId).appendChild(link);
         } catch (err) {
             writeLog(`Gagal menampilkan gambar ${entry.filename}: ${err.message}`, "error");
         }
@@ -509,7 +498,6 @@
 
         try {
             const url = `https://script.google.com/macros/s/AKfycbx7SKC07GhMapbyhVCl-e7IswbfXLlKrOxbG2MmduFi6QcWhxxKVWVHbYWr28sU_8UVmw/exec?fileId=${fileId}`;
-
             const res = await fetch(url);
             if (!res.ok) throw new Error("Gagal fetch ZIP dari GAS");
 
@@ -583,14 +571,6 @@
         document.getElementById('fileIdDisplay').textContent = fileId || "-";
         document.getElementById('fileUrlDisplay').value = fileId ?
             `https://drive.google.com/uc?id=${fileId}&export=download` : "-";
-
-        // cek support blob di tab baru
-        blobSupport = canOpenBlobInNewTab();
-        if (blobSupport) {
-            writeLog("Browser support buka blob di tab baru", "info");
-        } else {
-            writeLog("Browser tidak support buka blob di tab baru, fallback ke download", "info");
-        }
 
         document.getElementById('decompressBtn').onclick = downloadAndDecompress;
         document.getElementById('downloadBtn').onclick = downloadZIPDirect;
